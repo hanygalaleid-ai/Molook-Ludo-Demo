@@ -1,0 +1,26 @@
+name: Code168 Encrypted Build Keygen
+on:
+  push:
+    paths:
+      - '.github/workflows/code168-keygen.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  keygen:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate temporary RSA keypair
+        run: |
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:3072 -out private.pem
+          openssl rsa -pubout -in private.pem -out public.pem
+          echo '---CODE168_PUBLIC_KEY_BEGIN---'
+          cat public.pem
+          echo '---CODE168_PUBLIC_KEY_END---'
+      - name: Store private key as short-lived artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: code168-private-key
+          path: private.pem
+          retention-days: 1
+          if-no-files-found: error
