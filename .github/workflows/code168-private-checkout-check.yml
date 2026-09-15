@@ -1,0 +1,17 @@
+name: Code168 Private Checkout Check
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/code168-private-checkout-check.yml'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: hanygalaleid-ai/Fsp
+          ref: main
+          token: ${{ github.token }}
+      - name: Verify project exists
+        run: test -f transport-assistant/app/build.gradle && grep -q 'versionCode 168' transport-assistant/app/build.gradle
