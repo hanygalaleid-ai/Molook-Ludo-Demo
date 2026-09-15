@@ -1,0 +1,11 @@
+name: Code168 Runner Check
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/code168-runner-check.yml'
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'runner-ready'
