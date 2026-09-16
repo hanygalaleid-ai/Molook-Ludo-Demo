@@ -1,0 +1,161 @@
+name: Code168 Secure Ephemeral Android Build V2
+
+on:
+  push:
+    paths:
+      - '.github/workflows/code168-secure-build-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      RESULT_PUB_B64: LS0tLS1CRUdJTiBQVUJMSUMgS0VZLS0tLS0KTUlJQ0lqQU5CZ2txaGtpRzl3MEJBUUVGQUFPQ0FnOEFNSUlDQ2dLQ0FnRUFzKzVIVHJPZVhrU3ZkSzhqRTUrLwpzV0F4cmt5VitKYTdqWkZYZjdYNnN0S2pFa3RYK1NKdFlxcHRaQVNwYnN2TEUxVUgrZXdYcmVaU05ZZXkwZE40Ci9CU1hsVWVONlp5VkpCYlJnMjZsdm11OFdhV0kxUW15bXFVdzdSY1B6aG1pQVdCQXpLYVB6bzg5M1hEUlpZakcKbThodGgrZ3MyZWxhL3Z0N1dBaVRaK1VrMDdhb290QW5qWUdiZzZLT0Fzb0JtZGhnUnBFbG5yNHlSVEdGMW5vOQpHYVdadjhJSTZKTjBWdG1UVW5wUDVYM0N2bHpvalRuMjZJUFV6RThnZU1QODNDSk91clRaWlRZcXA1MDdnNGIwCmlDN3NvS1pCaDNtbGhSSjlYZldxUlA5Y0o5OFhBZG1lbU9TL0x3SkdHa0JQeGZhQ3pTaGpLUlB3QVplelRxcFYKUTRjTEhXVDFMN0p4ZlAycWFYaE40WnF2bFZYWlhKN0w5b2FXTjRUelNVNVFla3RDVVk5UDBXd3JkRVlqWVFxawpubUdBS3RUSERCQ2pSb0RYTzBYS09vdFJYY0NuM1BCSHJoU3MyNGwwWEkzRWM5L20yTTNPMDkrWDN6SWd4RFhECm1mWTVvWjdWUitqdFZkbUxJMlE1b0FQeEV3NUNDZEEwcmxNaDRlV2tLbkIyZ0hSQXJqdDk2Z3ptZnNPVGN2NVIKT3J3YXdreHJoaEkzSTk0aGRralRWYnV4T0Zib3R6cmtlNjdTSXRMbC9DbUMzaHQzUlF6UnRuWFJhWHd5NENjbApBM0k2Uy9IRFd4T1l6dVBNV2EyaU5jb2N3WW01OUZmS3RhZ2xmbEN0bEh4d2FqMHAydHVCMnE3UWF2R3o2SmtYCnhXa3B0TVEwVUFEUWxCOG1JOC9WVXIwQ0F3RUFBUT09Ci0tLS0tRU5EIFBVQkxJQyBLRVktLS0tLQo=
+
+    steps:
+      - name: Generate one-run inbound key
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/code168 public-key
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096 -out /tmp/code168/in_private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/code168/in_private.pem -pubout -out /tmp/code168/in_public.pem
+          cp /tmp/code168/in_public.pem public-key/in_public.pem
+
+      - name: Publish safe public key
+        uses: actions/upload-artifact@v4
+        with:
+          name: code168-public-key
+          path: public-key/in_public.pem
+          retention-days: 1
+
+      - name: Wait for encrypted payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 180); do
+            stamp=$(date +%s)
+            if curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/bridge/code168_payload.enc?${stamp}" -o /tmp/code168/payload.enc \
+              && curl -fsSL "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/bridge/code168_key.enc?${stamp}" -o /tmp/code168/key.enc; then
+              test -s /tmp/code168/payload.enc && test -s /tmp/code168/key.enc && exit 0
+            fi
+            sleep 3
+          done
+          echo 'Encrypted payload did not arrive in time.' >&2
+          exit 1
+
+      - name: Decrypt payload in runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl pkeyutl -decrypt -inkey /tmp/code168/in_private.pem -in /tmp/code168/key.enc -out /tmp/code168/keyinfo.txt \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          IFS=: read -r KEY IV < /tmp/code168/keyinfo.txt
+          openssl enc -d -aes-256-cbc -K "$KEY" -iv "$IV" -in /tmp/code168/payload.enc -out /tmp/code168/payload.zip
+          mkdir -p /tmp/code168/input
+          unzip -q /tmp/code168/payload.zip -d /tmp/code168/input
+          test -s /tmp/code168/input/source.zip
+          test -s /tmp/code168/input/upload-key.jks
+          test -s /tmp/code168/input/signing.env
+          rm -f /tmp/code168/keyinfo.txt /tmp/code168/payload.zip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'platform-tools' >/dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.1.0'
+
+      - name: Inspect and build Code168
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/code168/project
+          unzip -q /tmp/code168/input/source.zip -d /tmp/code168/project
+          PROJECT=$(dirname "$(find /tmp/code168/project -maxdepth 3 -name settings.gradle -print -quit)")
+          test -n "$PROJECT"
+          if grep -RniE 'Dash[ -]?Cam|DashCam|داش[ -]?كام|dash_camera|dash_recording|CameraX|android.permission.CAMERA|RECORD_AUDIO|FOREGROUND_SERVICE_CAMERA|FOREGROUND_SERVICE_MICROPHONE|DashRecording|DashVideo' "$PROJECT"; then
+            echo 'Legacy Dash Cam content found; refusing to build.' >&2
+            exit 2
+          fi
+          grep -q "applicationId 'com.ayaamhany.rideshield'" "$PROJECT/app/build.gradle"
+          grep -q 'versionCode 168' "$PROJECT/app/build.gradle"
+          grep -q "versionName '6.1.36'" "$PROJECT/app/build.gradle"
+          set -a
+          . /tmp/code168/input/signing.env
+          set +a
+          export ANDROID_KEYSTORE_PATH=/tmp/code168/input/upload-key.jks
+          cd "$PROJECT"
+          gradle --no-daemon clean testDebugUnitTest lintDebug assembleRelease bundleRelease
+
+      - name: Verify signed outputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT=$(dirname "$(find /tmp/code168/project -maxdepth 3 -name settings.gradle -print -quit)")
+          APK="$PROJECT/app/build/outputs/apk/release/app-release.apk"
+          AAB="$PROJECT/app/build/outputs/bundle/release/app-release.aab"
+          test -s "$APK" && test -s "$AAB"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee /tmp/code168/apk_verify.txt
+          CERT=$(grep -i 'certificate SHA-256 digest:' /tmp/code168/apk_verify.txt | head -1 | awk '{print $NF}' | tr 'A-F' 'a-f' | tr -d ':')
+          test "$CERT" = '03e3c41a7f11e8d02e7d5e98803434816e7107b647d79174935498d2232c5cf6'
+          jarsigner -verify "$AAB" >/tmp/code168/aab_verify.txt 2>&1
+          grep -qi 'jar verified' /tmp/code168/aab_verify.txt
+          APPID=$(apkanalyzer manifest application-id "$APK")
+          VCODE=$(apkanalyzer manifest version-code "$APK")
+          VNAME=$(apkanalyzer manifest version-name "$APK")
+          test "$APPID" = 'com.ayaamhany.rideshield'
+          test "$VCODE" = '168'
+          test "$VNAME" = '6.1.36'
+          mkdir -p /tmp/code168/out
+          cp "$APK" /tmp/code168/out/SmartTransportAssistant_v6.1.36_CODE168_SIGNED.apk
+          cp "$AAB" /tmp/code168/out/SmartTransportAssistant_v6.1.36_CODE168_SIGNED.aab
+          cp /tmp/code168/input/source.zip /tmp/code168/out/SmartTransportAssistant_v6.1.36_CODE168_SOURCE.zip
+          sha256sum /tmp/code168/out/* > /tmp/code168/out/SHA256SUMS.txt
+          {
+            echo 'Smart Transport Assistant Code168 build verified'
+            echo 'Package: com.ayaamhany.rideshield'
+            echo 'Version: 6.1.36 (168)'
+            echo 'Legacy Dash Cam audit: PASS'
+            echo 'APK signing SHA-256: 03:E3:C4:1A:7F:11:E8:D0:2E:7D:5E:98:80:34:34:81:6E:71:07:B6:47:D7:91:74:93:54:98:D2:23:2C:5C:F6'
+          } > /tmp/code168/out/BUILD_REPORT.txt
+
+      - name: Encrypt results back to owner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "$RESULT_PUB_B64" | base64 -d > /tmp/code168/result_public.pem
+          (cd /tmp/code168/out && zip -q /tmp/code168/results.zip *)
+          KEY=$(openssl rand -hex 32)
+          IV=$(openssl rand -hex 16)
+          openssl enc -aes-256-cbc -K "$KEY" -iv "$IV" -in /tmp/code168/results.zip -out /tmp/code168/results.enc
+          printf '%s:%s\n' "$KEY" "$IV" > /tmp/code168/result_keyinfo.txt
+          openssl pkeyutl -encrypt -pubin -inkey /tmp/code168/result_public.pem -in /tmp/code168/result_keyinfo.txt -out /tmp/code168/results.key \
+            -pkeyopt rsa_padding_mode:oaep -pkeyopt rsa_oaep_md:sha256
+          rm -f /tmp/code168/result_keyinfo.txt /tmp/code168/results.zip
+          mkdir -p encrypted-results
+          cp /tmp/code168/results.enc encrypted-results/
+          cp /tmp/code168/results.key encrypted-results/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: code168-encrypted-results
+          path: encrypted-results/
+          retention-days: 1
+          if-no-files-found: error
