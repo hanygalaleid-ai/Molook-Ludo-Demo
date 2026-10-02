@@ -1,0 +1,33 @@
+name: Card Ludo Server Probe
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/card-ludo-server-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: self-hosted
+    timeout-minutes: 3
+    steps:
+      - name: Probe Card Ludo server
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "HOSTNAME=$(hostname)"
+          echo "USER=$(id -un)"
+          echo "PWD=$(pwd)"
+          if [ -d /opt/card-ludo/client-unity ]; then
+            echo "CARD_LUDO_PROJECT_FOUND=yes"
+            ls -ld /opt/card-ludo /opt/card-ludo/client-unity
+            test -f /opt/card-ludo/client-unity/ProjectSettings/ProjectVersion.txt
+            cat /opt/card-ludo/client-unity/ProjectSettings/ProjectVersion.txt
+          else
+            echo "CARD_LUDO_PROJECT_FOUND=no"
+            exit 2
+          fi
