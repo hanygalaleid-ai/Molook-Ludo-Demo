@@ -13,21 +13,27 @@ permissions:
 jobs:
   probe:
     runs-on: self-hosted
-    timeout-minutes: 3
+    timeout-minutes: 5
     steps:
-      - name: Probe Card Ludo server
+      - name: Probe Card Ludo 2v2 implementation points
         shell: bash
         run: |
           set -euo pipefail
+          ROOT=/opt/card-ludo
+          UNITY="$ROOT/client-unity"
+          BACK="$ROOT/backend/nakama/src"
           echo "HOSTNAME=$(hostname)"
           echo "USER=$(id -un)"
-          echo "PWD=$(pwd)"
-          if [ -d /opt/card-ludo/client-unity ]; then
-            echo "CARD_LUDO_PROJECT_FOUND=yes"
-            ls -ld /opt/card-ludo /opt/card-ludo/client-unity
-            test -f /opt/card-ludo/client-unity/ProjectSettings/ProjectVersion.txt
-            cat /opt/card-ludo/client-unity/ProjectSettings/ProjectVersion.txt
-          else
-            echo "CARD_LUDO_PROJECT_FOUND=no"
-            exit 2
-          fi
+          test -d "$UNITY"
+          test -d "$BACK"
+          echo '=== QUICK / ONE_VS_ONE REFERENCES ==='
+          grep -RniE '1 ضد 1|1v1|one_vs_one|quick match|quick|سريع'             "$UNITY/Assets/CardLudo/Scripts" "$UNITY/Assets/CardLudo/Editor" "$BACK"             --include='*.cs' --include='*.ts' | head -220 || true
+          echo '=== PLAYERS/MODE REFERENCES ==='
+          grep -RniE 'players.?=.?2|players.?=.?4|MatchMode|CreateRoomRequest|find_public_match|create_private_room|matchmaker|team'             "$UNITY/Assets/CardLudo/Scripts" "$BACK"             --include='*.cs' --include='*.ts' | head -280 || true
+          echo '=== HOME/MODES BUILDERS ==='
+          find "$UNITY/Assets/CardLudo" -type f ( -name '*.cs' -o -name '*.unity' )             -print0 | xargs -0 grep -niE 'QUICK|1V1|1 ضد 1|ابدأ اللعب|two_vs_two|2v2' | head -220 || true
+          echo '=== BACKEND MATCH TYPES ==='
+          sed -n '1,240p' "$BACK/types.ts" || true
+          echo '=== BACKEND CREATE / FIND RPC ==='
+          grep -nE 'create_private_room|find_public_match|mode|players|one_vs_one|team' "$BACK/rpc.ts" | head -240 || true
+          echo 'PROBE_2V2_DONE'
