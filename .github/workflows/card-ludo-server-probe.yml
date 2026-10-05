@@ -8,13 +8,14 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
     runs-on: self-hosted
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
+      - uses: actions/checkout@v4
       - name: Probe Card Ludo 2v2 implementation points
         shell: bash
         run: |
@@ -22,18 +23,37 @@ jobs:
           ROOT=/opt/card-ludo
           UNITY="$ROOT/client-unity"
           BACK="$ROOT/backend/nakama/src"
-          echo "HOSTNAME=$(hostname)"
-          echo "USER=$(id -un)"
-          test -d "$UNITY"
-          test -d "$BACK"
-          echo '=== QUICK / ONE_VS_ONE REFERENCES ==='
-          grep -RniE '1 ضد 1|1v1|one_vs_one|quick match|quick|سريع'             "$UNITY/Assets/CardLudo/Scripts" "$UNITY/Assets/CardLudo/Editor" "$BACK"             --include='*.cs' --include='*.ts' | head -220 || true
-          echo '=== PLAYERS/MODE REFERENCES ==='
-          grep -RniE 'players.?=.?2|players.?=.?4|MatchMode|CreateRoomRequest|find_public_match|create_private_room|matchmaker|team'             "$UNITY/Assets/CardLudo/Scripts" "$BACK"             --include='*.cs' --include='*.ts' | head -280 || true
-          echo '=== HOME/MODES BUILDERS ==='
-          find "$UNITY/Assets/CardLudo" -type f ( -name '*.cs' -o -name '*.unity' )             -print0 | xargs -0 grep -niE 'QUICK|1V1|1 ضد 1|ابدأ اللعب|two_vs_two|2v2' | head -220 || true
-          echo '=== BACKEND MATCH TYPES ==='
-          sed -n '1,240p' "$BACK/types.ts" || true
-          echo '=== BACKEND CREATE / FIND RPC ==='
-          grep -nE 'create_private_room|find_public_match|mode|players|one_vs_one|team' "$BACK/rpc.ts" | head -240 || true
-          echo 'PROBE_2V2_DONE'
+          REPORT="$GITHUB_WORKSPACE/bridge/card-ludo-2v2-probe.txt"
+          mkdir -p "$(dirname "$REPORT")"
+          {
+            echo "HOSTNAME=$(hostname)"
+            echo "USER=$(id -un)"
+            echo "DATE=$(date -u +%FT%TZ)"
+            test -d "$UNITY"
+            test -d "$BACK"
+            echo '=== QUICK / ONE_VS_ONE REFERENCES ==='
+            grep -RniE '1 ضد 1|1v1|one_vs_one|quick match|quick|سريع'               "$UNITY/Assets/CardLudo/Scripts" "$UNITY/Assets/CardLudo/Editor" "$BACK"               --include='*.cs' --include='*.ts' | head -260 || true
+            echo '=== PLAYERS/MODE REFERENCES ==='
+            grep -RniE 'players.?=.?2|players.?=.?4|MatchMode|CreateRoomRequest|find_public_match|create_private_room|matchmaker|team'               "$UNITY/Assets/CardLudo/Scripts" "$BACK"               --include='*.cs' --include='*.ts' | head -320 || true
+            echo '=== HOME/MODES BUILDERS ==='
+            find "$UNITY/Assets/CardLudo" -type f ( -name '*.cs' -o -name '*.unity' )               -print0 | xargs -0 grep -niE 'QUICK|1V1|1 ضد 1|ابدأ اللعب|two_vs_two|2v2' | head -260 || true
+            echo '=== MATCH MODEL ==='
+            sed -n '1,240p' "$UNITY/Assets/CardLudo/Scripts/Core/MatchModels.cs" 2>/dev/null || true
+            echo '=== NETWORK DTO ==='
+            sed -n '1,260p' "$UNITY/Assets/CardLudo/Scripts/Networking/NetworkDtos.cs" 2>/dev/null || true
+            echo '=== BACKEND TYPES ==='
+            sed -n '1,280p' "$BACK/types.ts" || true
+            echo '=== BACKEND RPC MODE BLOCKS ==='
+            grep -nE 'create_private_room|find_public_match|mode|players|one_vs_one|team' "$BACK/rpc.ts" | head -300 || true
+            echo 'PROBE_2V2_DONE'
+          } > "$REPORT" 2>&1
+          sed -n '1,500p' "$REPORT"
+      - name: Publish probe report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "card-ludo-server-runner"
+          git config user.email "actions@users.noreply.github.com"
+          git add bridge/card-ludo-2v2-probe.txt
+          git commit -m "Record Card Ludo 2v2 server probe" || exit 0
+          git push origin HEAD:main
